@@ -186,17 +186,9 @@ Aliases such as `py`, `next`, `nodejs`, and `torch` also work. Stack rules are d
 
 ## How it works
 
-```text
-  "your shorthand"  ──┐
-                      ├──►  system prompt (fixed schema + stack rules)  ──►  local Ollama model
-  workspace scan   ───┘                                                        │
-  (tree, README/config, AST outline)                                           ▼
-                                                     clean + validate 7 tags (one auto-repair retry)
-                                                                               │
-                                                     replace <codebase_context> with real scan facts
-                                                                               ▼
-                                                              printed to terminal + clipboard
-```
+<p align="center">
+  <img src="https://raw.githubusercontent.com/RiteshNipane/PromptPump/main/docs/how-it-works.png" alt="PromptPump pipeline: shorthand and workspace scan feed a fixed-schema system prompt, a local Ollama model, validation with one repair retry, grounding with real scan facts, then terminal and clipboard output" width="460">
+</p>
 
 **Built to be as deterministic as a local LLM allows**
 
