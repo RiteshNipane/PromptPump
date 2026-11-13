@@ -2,7 +2,7 @@
 
 # ⚡ PromptPump
 
-**Turn a one-line idea into a production-grade coding prompt, using your own codebase and a local LLM.**
+**Enhance your prompt from a one-line idea into a production-grade coding prompt, using your own codebase and a local LLM.**
 
 [![PyPI](https://img.shields.io/pypi/v/promptpump)](https://pypi.org/project/promptpump/)
 [![Python](https://img.shields.io/pypi/pyversions/promptpump)](https://pypi.org/project/promptpump/)
