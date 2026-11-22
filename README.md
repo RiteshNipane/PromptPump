@@ -31,7 +31,7 @@ PromptPump has three workflows, selected from the startup menu or with `--type`:
 3. **Content** shapes stories, scripts, articles, and other writing around audience, structure, voice, and boundaries.
 4. **Compiles locally** with Ollama and can copy the enhanced prompt to your clipboard.
 
-### How a better prompt helps
+### How PromptPump structures requests
 
 | Without PromptPump | With PromptPump |
 | --- | --- |
@@ -44,7 +44,8 @@ PromptPump has three workflows, selected from the startup menu or with `--type`:
 | Feature creep | Explicit scope rules and "files not to touch" |
 | Rambling replies | Exact output format you want back (files, diffs, test plan) |
 
-Fewer clarification rounds, fewer wrong guesses, and less cleanup afterwards.
+The goal is to reduce clarification rounds, wrong guesses, and cleanup. PromptPump does not
+guarantee those outcomes; see the small code-generation pilot under [Evaluation status](#evaluation-status).
 
 > PromptPump improves the *input*. Output quality still depends on the model that runs your final prompt, and the compiling model's reasoning. Always review the generated prompt before using it (see [Tips](#tips-for-best-results)).
 
@@ -344,12 +345,28 @@ placement.
 
 ## Evaluation status
 
-**Automated test suite (2026-11-22):** `python -m pytest -q` — **82 passed** (2 dependency deprecation warnings).
+**Automated test suite (2026-11-22):** `python -m pytest -q` — **84 passed** (2 dependency deprecation warnings).
 
-**Prompt-quality A/B evaluation:** not run. This repository has no benchmark dataset/harness
-that compares raw prompts with PromptPump prompts, so the test-suite result above is not a
-prompt-quality score. Treat claims that structured prompts improve code generation as a
-hypothesis until that benchmark is run.
+**Prompt-quality pilot (2026-11-22, final run):** three synthetic Python tasks, one generation
+per task and condition, using `qwen2.5-coder:7b-instruct-q4_K_M` with Ollama 0.40.16. All
+variants used the same code-generation model and fixture tests; PromptPump also used that model
+to compile its prompt. A condition passes a task only when every test passes. PromptPump allows
+two repair attempts for malformed output and recovers a malformed final output-format section.
+
+| Task | Raw request | Full repository dump | PromptPump prompt |
+| --- | ---: | ---: | ---: |
+| Feature flags | Fail | Pass | Pass |
+| Retry-After parsing | Fail | Pass | Pass |
+| Unicode URL slug | Fail | Fail | Pass |
+| **Tasks passed** | **0/3** | **2/3** | **3/3** |
+
+PromptPump passed all three tasks in this run; the full dump passed two and the raw request
+passed none. This single-model, single-sample pilot is too small to support broad quality
+claims. Treat improvement claims as a hypothesis until more tasks, models, and repeated
+generations are measured. The [benchmark harness and fixtures](benchmarks/prompt_quality/README.md)
+and [raw results](benchmarks/prompt_quality/results/0.2.0-pilot.json) are included for review.
+
+Reproduce with `python benchmarks/prompt_quality/run.py --model qwen2.5-coder:7b-instruct-q4_K_M`.
 
 ---
 

@@ -1,0 +1,1 @@
+Implement a URL-safe slug helper in the existing module. Follow its normalization conventions, handle punctuation, repeated separators, Unicode letters, and empty input. Do not add dependencies. For this benchmark, return the complete replacement contents of `main.py` in one Python code block.

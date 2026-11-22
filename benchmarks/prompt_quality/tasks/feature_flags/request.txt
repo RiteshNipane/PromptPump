@@ -1,0 +1,1 @@
+Implement loading the documented feature flags through the existing boolean parsing helper. Preserve the defaults and allow passing an environment mapping for deterministic tests. For this benchmark, return the complete replacement contents of `main.py` in one Python code block.

@@ -206,6 +206,34 @@ def find_missing_tags(
     return [t for t in required_tags if f"<{t}>" not in text or f"</{t}>" not in text]
 
 
+def _recover_expected_output_format(prompt: str) -> str:
+    """Normalize a missing or malformed final output-format section."""
+    tag = "expected_output_format"
+    opening = re.search(rf"<\s*{tag}\b[^>]*>", prompt, flags=re.IGNORECASE)
+    closing = re.search(rf"</\s*{tag}\s*>", prompt, flags=re.IGNORECASE)
+    if opening and closing and closing.start() >= opening.end():
+        body = prompt[opening.end() : closing.start()].strip()
+        prefix = prompt[: opening.start()].rstrip() + prompt[closing.end() :].lstrip()
+    elif opening:
+        # This is the final schema section, so preserve its remaining body and close it.
+        body = prompt[opening.end() :].strip()
+        prefix = prompt[: opening.start()].rstrip()
+    elif closing:
+        body = ""
+        prefix = prompt[: closing.start()].rstrip() + prompt[closing.end() :].lstrip()
+    else:
+        body = ""
+        prefix = prompt.rstrip()
+
+    if not body:
+        body = (
+            "Follow the output format, length, and constraints requested by the user. "
+            "Return only the requested deliverable and include no unrelated content."
+        )
+    section = f"<{tag}>\n{body}\n</{tag}>"
+    return f"{prefix}\n{section}" if prefix else section
+
+
 def ground_codebase_context(prompt: str, summary: str) -> str:
     """Replace the model-written ``<codebase_context>`` with deterministic facts."""
     block = f"<codebase_context>\n{summary}\n</codebase_context>"
@@ -229,6 +257,7 @@ class CompileResult:
     missing_tags: list[str] = field(default_factory=list)
     metrics: list[InferenceMetrics] = field(default_factory=list)
     issues: list[Issue] = field(default_factory=list)
+    fallback_tags: list[str] = field(default_factory=list)
 
     @property
     def is_valid(self) -> bool:
@@ -239,7 +268,7 @@ class PromptCompiler:
     """Combines shorthand + workspace + template rules and runs the local model."""
 
     def __init__(
-        self, client: ChatClient, *, ground_context: bool = True, max_repairs: int = 1,
+        self, client: ChatClient, *, ground_context: bool = True, max_repairs: int = 2,
         verify: bool = True,
     ) -> None:
         self.client = client
@@ -291,7 +320,7 @@ class PromptCompiler:
         missing = find_missing_tags(prompt, required_tags)
         attempts = 1
 
-        # One-shot repair loop: show the model what it missed and ask for a full redo.
+        # Repair malformed model output before applying deterministic schema recovery.
         while missing and attempts <= self.max_repairs:
             messages = [
                 *messages,
@@ -299,9 +328,11 @@ class PromptCompiler:
                 {
                     "role": "user",
                     "content": (
-                        f"Your output is missing or has unclosed tags: {', '.join(missing)}. "
-                        f"Re-output the COMPLETE prompt with all seven required tags in this "
-                        f"order: {', '.join(required_tags)}. Output only the prompt."
+                        "Your output is missing or has unclosed required sections, so it is "
+                        f"invalid: {', '.join(missing)}. Re-output the COMPLETE prompt with "
+                        "exactly these XML sections, each with matching opening and closing "
+                        f"tags, in this order: {', '.join(required_tags)}. The final section "
+                        f"<{required_tags[-1]}> is mandatory. Output only the prompt."
                     ),
                 },
             ]
@@ -309,6 +340,13 @@ class PromptCompiler:
             prompt = clean_response(raw)
             missing = find_missing_tags(prompt, required_tags)
             attempts += 1
+
+        fallback_tags: list[str] = []
+        output_tag = "expected_output_format"
+        if missing == [output_tag]:
+            prompt = _recover_expected_output_format(prompt)
+            missing = find_missing_tags(prompt, required_tags)
+            fallback_tags.append(output_tag)
 
         grounded = False
         if (
@@ -326,6 +364,7 @@ class PromptCompiler:
             attempts=attempts,
             grounded=grounded,
             missing_tags=missing,
+            fallback_tags=fallback_tags,
             metrics=metrics,
             issues=(
                 check_references(prompt, context, shorthand)

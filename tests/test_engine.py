@@ -210,9 +210,33 @@ def test_compile_retries_when_tags_missing(workspace: Path) -> None:
 
 
 def test_compile_reports_missing_after_retries(workspace: Path) -> None:
-    client = FakeClient("junk", "still junk")
+    client = FakeClient("junk", "still junk", "still invalid")
     result = PromptCompiler(client).compile("x", scan_workspace(workspace))
     assert not result.is_valid and result.missing_tags == list(REQUIRED_TAGS)
+
+
+def test_compile_recovers_missing_output_format_after_retries(workspace: Path) -> None:
+    incomplete = make_prompt().replace(
+        "<expected_output_format>\ncontent\n</expected_output_format>", ""
+    )
+    client = FakeClient(incomplete, incomplete, incomplete)
+    result = PromptCompiler(client).compile("add a feature", scan_workspace(workspace))
+    assert result.is_valid
+    assert result.fallback_tags == ["expected_output_format"]
+    assert "<expected_output_format>" in result.prompt
+    assert "Follow the output format" in result.prompt
+
+
+def test_compile_normalizes_an_unclosed_output_format_section(workspace: Path) -> None:
+    incomplete = make_prompt().replace(
+        "<expected_output_format>\ncontent\n</expected_output_format>",
+        "<expected_output_format >\nReturn full source for main.py",
+    )
+    client = FakeClient(incomplete, incomplete, incomplete)
+    result = PromptCompiler(client).compile("add a feature", scan_workspace(workspace))
+    assert result.is_valid
+    assert result.fallback_tags == ["expected_output_format"]
+    assert "<expected_output_format>\nReturn full source for main.py\n</expected_output_format>" in result.prompt
 
 
 def test_empty_shorthand_rejected(workspace: Path) -> None:
