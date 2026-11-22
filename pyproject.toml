@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "promptpump"
-version = "0.1.0"
+version = "0.2.0.dev0"
 description = "Deterministic context-engineering engine and prompt compiler powered by a local Ollama model."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,6 +32,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+tokens = ["tiktoken>=0.7"]
 dev = ["pytest>=7.4", "ruff>=0.4"]
 
 [project.urls]

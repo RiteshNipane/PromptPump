@@ -2,13 +2,13 @@
 
 # ⚡ PromptPump
 
-**Enhance your prompt from a one-line idea into a production-grade coding prompt, using your own codebase and a local LLM.**
+**convert ideas into reality.**
 
 [![PyPI](https://img.shields.io/pypi/v/promptpump)](https://pypi.org/project/promptpump/)
 [![Python](https://img.shields.io/pypi/pyversions/promptpump)](https://pypi.org/project/promptpump/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-100% local · no API keys · no code leaves your machine
+100% local · no API keys · prompts stay on your machine
 
 </div>
 
@@ -20,24 +20,26 @@ promptpump run "add source citations to each RAG answer" --stack fastapi
 
 ## Why PromptPump?
 
-AI coding assistants are only as good as the prompt you give them. Most of us type something like *"add a pause menu"* and then spend the next ten messages fixing what the model guessed wrong: wrong files, duplicated helpers, invented APIs, scope creep.
+Generative AI tools are only as good as the prompt you give them. A short request like *"add a pause menu"*, *"a fox in a snowy forest"*, or *"write a tense opening scene"* can leave important details unspecified.
 
 A great prompt has **structure** (role, objective, constraints, output format) and **context** (what your project actually looks like). Writing that by hand every time is slow, so people skip it.
 
-PromptPump does it for you:
+PromptPump has three workflows, selected from the startup menu or with `--type`:
 
-1. **Scans your project**: file tree, README and config snippets, and an AST outline of your Python modules (classes, functions, signatures).
-2. **Applies a strict schema**: seven fixed sections, plus optional stack rules (FastAPI, React, Pygame, PyTorch...).
-3. **Compiles with a local model**: Ollama + Qwen2.5-Coder turns your shorthand into a dense master prompt.
-4. **Copies it to your clipboard**, ready to paste into Claude, ChatGPT, Cursor, Copilot, or any agent.
+1. **Code** scans your project and adds file-aware implementation guidance and optional stack rules.
+2. **Image** structures the subject, visual style, composition, lighting, and relevant constraints.
+3. **Content** shapes stories, scripts, articles, and other writing around audience, structure, voice, and boundaries.
+4. **Compiles locally** with Ollama and can copy the enhanced prompt to your clipboard.
 
-### How a better prompt improves your coding
+### How a better prompt helps
 
 | Without PromptPump | With PromptPump |
 | --- | --- |
 | *"add a pause menu"* | Role, measurable objective, success criteria, out-of-scope list |
-| Model guesses your file layout | Real file tree and function signatures from **your** repo |
-| Re-invents helpers you already have | Told to **reuse existing functions** it can see |
+| Image request is vague | Clear subject, style, composition, and lighting directions |
+| Story request has no shape | Audience, narrative structure, voice, and constraints are explicit |
+| Code model guesses your file layout | Real file tree and function signatures from **your** repo |
+| Re-invents helpers it can see | Code mode is told to **reuse existing functions** |
 | Silent assumptions | Unknowns listed under *Assumptions (verify before coding)* |
 | Feature creep | Explicit scope rules and "files not to touch" |
 | Rambling replies | Exact output format you want back (files, diffs, test plan) |
@@ -55,8 +57,8 @@ Fewer clarification rounds, fewer wrong guesses, and less cleanup afterwards.
 ### 1. Get a local model
 
 ```bash
-ollama pull qwen2.5-coder:7b      # fast, runs on most machines
-ollama pull qwen2.5-coder:14b     # recommended: noticeably better prompts (~9 GB, needs ~12 GB RAM/VRAM)
+ollama pull qwen2.5-coder:7b      # fast: ~19 tokens/s on a 6 GB laptop GPU (see Performance)
+ollama pull qwen2.5-coder:14b     # stronger instruction-following in informal tests (~9 GB); ~6x slower on a 6 GB GPU
 ```
 
 ### 2. Install PromptPump
@@ -102,6 +104,19 @@ promptpump run "add jwt auth to the api" --stack fastapi --stack python
 ```
 
 The compiled prompt is printed and copied to your clipboard. Paste it into your AI assistant.
+
+Run `promptpump` with no arguments to open the interactive menu. You can also choose a mode
+directly:
+
+```bash
+promptpump run "a tiny astronaut tending a garden on the moon" --type image
+promptpump run "write a 3-scene mystery short film set in a night train" --type content
+```
+
+Image and content modes do not scan the current folder. Code mode remains the default and
+continues to use workspace context. Use an instruction-following Ollama model suited to
+creative prompting (for example, `--model qwen2.5:7b` if installed); PromptPump enhances
+prompts and does not generate the final image or story itself.
 
 Local models can take a minute or two on CPU. Use `--timeout 900` for big models on slow machines.
 
@@ -158,14 +173,17 @@ Python modules (public API):
 | Command | Description |
 | --- | --- |
 | `promptpump run "<prompt>"` | Compile a shorthand prompt into a master prompt |
+| `promptpump` or `promptpump menu` | Open the interactive code/image/content selector |
 | `promptpump stacks` | List available stack profiles |
 | `promptpump doctor` | Check Ollama connectivity and model availability |
+| `promptpump telemetry` | Measure TTFT, tokens/sec, token counts, and peak GPU memory on your machine |
 | `promptpump --version` | Show the installed version |
 
 ### `run` options
 
 | Option | Default | Description |
 | --- | --- | --- |
+| `--type` | `code` | Prompt workflow: `code`, `image`, or `content` |
 | `--stack`, `-s` | none | Inject stack rules; repeatable |
 | `--copy / --no-copy` | copy | Copy the result to the clipboard |
 | `--path`, `-p` | `.` | Project directory to scan |
@@ -174,13 +192,34 @@ Python modules (public API):
 | `--max-context-tokens` | `3000` | Budget for the workspace snapshot |
 | `--ground / --no-ground` | ground | Overwrite `<codebase_context>` with deterministic scan facts |
 | `--timeout` | `300` | Seconds to wait for the model |
+| `--num-ctx` | `8192` | Model context window (env `PROMPTPUMP_NUM_CTX`); lower it to save memory |
+| `--rank / --no-rank` | rank | Pack the context budget by BM25 relevance to your prompt |
+| `--stats` | off | Show token budget, input-reduction %, and model-side telemetry |
+| `--tokenizer` | `heuristic` | Token counter: `heuristic`, `tiktoken` (needs `pip install 'promptpump[tokens]'`), `auto` |
+| `--output`, `-o` | stdout | Write the prompt to a file (UTF-8) instead of printing it |
+| `--log` | none | Save the warnings and stats shown on stderr to a file (UTF-8) |
 | `--dry-run` | off | Print the payload and exit without calling the model |
 
 ### Stack profiles
 
-`python` · `fastapi` · `django` · `react` · `nextjs` · `node` · `pygame` · `pytorch`
+Profiles cover common languages, frameworks, libraries, and tools. The names accepted by
+`--stack` are:
 
-Aliases such as `py`, `next`, `nodejs`, and `torch` also work. Stack rules are defaults; the compiler is told to skip any that conflict with conventions it sees in your project.
+- **Languages:** `python`, `javascript`, `typescript`, `java`, `kotlin`, `csharp`, `go`,
+  `rust`, `c`, `cpp`, `php`, `ruby`, `swift`, `dart`, `scala`, `elixir`, `r`, `sql`, `bash`
+- **Web and application frameworks:** `fastapi`, `django`, `flask`, `spring`, `aspnet`,
+  `rails`, `laravel`, `react`, `nextjs`, `angular`, `vue`, `svelte`, `express`, `nestjs`,
+  `react-native`, `flutter`, `electron`
+- **Libraries, databases, and tools:** `pydantic`, `sqlalchemy`, `redis`, `celery`, `pandas`,
+  `scikit-learn`, `pytorch`, `tensorflow`, `transformers`, `pygame`, `graphql`, `grpc`,
+  `pytest`, `playwright`, `postgresql`, `mysql`, `mongodb`, `docker`, `terraform`, `node`
+
+Use `promptpump stacks` to see labels and rule counts. Common aliases include `py`, `js`,
+`ts`, `golang`, `c++`, `c#`, `dotnet`, `postgres`, `mongo`, `next`, `nodejs`, `torch`, and
+`sklearn`. Stack
+rules are defaults; the compiler skips any that conflict with conventions it sees in your
+project. Combine profiles when useful, for example `--stack typescript --stack react --stack
+playwright`.
 
 ---
 
@@ -192,10 +231,11 @@ Aliases such as `py`, `next`, `nodejs`, and `torch` also work. Stack rules are d
 
 **Built to be as deterministic as a local LLM allows**
 
-- Fixed system prompt and stack rules, temperature `0.2`, fixed seed.
+- Fixed system prompt and stack rules, temperature `0.2`, fixed seed (outputs can still vary a little between runs).
 - Output validated against seven required sections: `role_definition`, `task_objective`, `codebase_context`, `architectural_specifications`, `implementation_steps`, `constraints_and_guardrails`, `expected_output_format`.
 - Filler text, reasoning blocks, and wrapping code fences are stripped.
 - The `<codebase_context>` section is overwritten with real scan data so the model cannot invent files.
+- Files and `backticked` functions named in the compiled prompt are checked against your repo; a function attributed to the wrong file, or a plan that edits tests/evaluation code your request never mentioned, is flagged as a warning (the prompt itself is never altered).
 
 **Safe by default**
 
@@ -220,11 +260,64 @@ print(result.is_valid, result.missing_tags)
 
 ---
 
+## Token budget and input reduction
+
+PromptPump packs your project into a fixed token budget (`--max-context-tokens`, default 3000): a file tree, key files (README, config, entry points), and a symbol outline of your code (Python via `ast`; JS/TS and Go via lightweight regexes). Outlines are packed in **BM25 relevance order** for your prompt, so the budget goes to the files most likely to matter instead of whatever comes first alphabetically.
+
+```bash
+promptpump run "add retry logic to the ollama client" --stats --dry-run
+```
+
+`--stats` prints the budget breakdown and the **input reduction versus pasting the whole repository** (every non-ignored text file, counted with the same tokenizer). The percentage depends on your repo and budget; it is measured per run, never assumed.
+
+- Token counts use a deterministic heuristic (~4 characters/token) by default, so numbers are identical on every machine. `--tokenizer tiktoken` gives an OpenAI-tokenizer approximation. The only exact model-side figure is Ollama's `prompt_eval_count`, shown by `--stats` after a real run.
+- A big reduction is only a win if the relevant files survive. The library exposes `gold_file_recall(context, files)` to check that, and the upcoming benchmark reports it alongside accuracy.
+- Ranking is lexical (BM25 over file paths, symbol names, and text), not semantic, so a prompt that uses different words than your code can rank poorly. Naming a file or function in the shorthand helps.
+
+## Performance and telemetry
+
+Measure your own hardware with one command:
+
+```bash
+promptpump telemetry --path . --runs 10 --write-readme README.md
+```
+
+It runs a fixed compile workload repeatedly (the first run is a cold start, with every loaded model evicted first) and reports **TTFT**, **decode tokens/sec**, model-side input/output tokens, and **peak GPU memory** (from `nvidia-smi`; N/A when no NVIDIA GPU is detected, never estimated). It also records the hardware, model, and quantization so the numbers can be interpreted. Prefer `--write-readme` or `--json-out` over copying from the terminal, which can drop spaces at line wraps.
+
+### Measured example: a 6 GB laptop GPU
+
+Nov 2026, PromptPump 0.2.0.dev0, Ollama 0.40.16, Windows 11, Intel Core i5-12450HX, 15.8 GB RAM, NVIDIA RTX 3050 6GB Laptop GPU. Same workload for both models (about 3.9k input tokens). The 7B run used 5 warm runs and the 14B run 9; both are single-machine measurements.
+
+| Metric | `qwen2.5-coder:7b` (Q4_K_M) | `qwen2.5-coder:14b` (Q4_K_M) |
+| --- | ---: | ---: |
+| Decode speed, warm (tokens/s) | 18.6 | 3.2 |
+| TTFT, warm median (s) | 2.16 | 2.56 |
+| TTFT, cold start (s) | 19.46 | 34.40 |
+| Time for the model call, warm median (s) | 27.1 | 167.9 |
+| Time for the model call, cold start (s) | 53.0 | 217.3 |
+| Output tokens, warm median | 464 | 533 |
+| Peak GPU memory, whole GPU (MiB) | 4,666 | 4,619 |
+| Share of model on GPU | 79% | not recorded |
+
+Reading it: decode speed, not input size, dominates the time. On this card the 14B model does not fit in VRAM and runs partly on the CPU, so it is about six times slower than the 7B for the same task. Output length also differed between runs even with a fixed seed, so repeated runs are similar but not identical. Faster GPUs with more VRAM will look very different; run the command above for your own numbers.
+
+### Your machine's full table
+
+<!-- promptpump:telemetry:start -->
+_Not generated yet. Run `promptpump telemetry --write-readme README.md` to fill in this table._
+<!-- promptpump:telemetry:end -->
+
+## Evaluation status
+
+A downstream A/B benchmark (raw prompt vs. repo dump vs. PromptPump prompt, scored by passing tests) is planned for v0.2.0 and has **not been run yet**. Until it is, treat claims that structured prompts improve code generation as a hypothesis, not a result.
+
+---
+
 ## Tips for best results
 
 - **Run it from your project root** so the scan reflects the real code.
 - **Be specific in the shorthand.** *"In api/main.py, make query_rag require [Source N] markers and return them in QueryResponse"* gives a much tighter prompt than *"add citations"*.
-- **Use the 14B model** if your hardware allows. 7B models drift more.
+- **Pick the model for your hardware.** The 14B model follows instructions better in informal tests but needs a GPU with roughly 12 GB of VRAM to run at a comfortable speed; on a 6 GB laptop GPU the 7B is the practical choice.
 - **Review before you paste.** Check file names, assumptions, and scope. Small local models can still misread intent.
 - Use `--dry-run` to see what the model receives, and `--max-context-tokens` to give larger projects more context.
 
@@ -235,6 +328,8 @@ print(result.is_valid, result.missing_tags)
 | Problem | Fix |
 | --- | --- |
 | `pipx` / `promptpump` not recognized (Windows) | Run `python -m pipx ensurepath`, then **reopen** the terminal |
+| `Ollama ran out of memory` | Run `ollama ps`, then `ollama stop <model>` for models you are not using; close heavy apps; use a smaller model or `--num-ctx 6144` |
+| Garbled characters (`Γö£ΓÇÉ`) or `NativeCommandError` after `> file` / `2> file` in Windows PowerShell 5.1 | PowerShell re-encodes redirected output. Use `--output prompt.md` and `--log notes.txt` instead: PromptPump writes both files itself as UTF-8 |
 | `Cannot reach Ollama` | Start it with `ollama serve` (or open the Ollama app) and run `promptpump doctor` |
 | `Model ... not found` | `ollama pull qwen2.5-coder:7b` (or the model you chose) |
 | Timeout on a slow machine | Add `--timeout 900`, or use the 7B model |
@@ -259,7 +354,12 @@ pytest
 promptpump/
 ├── cli.py        # Typer CLI (run, stacks, doctor)
 ├── engine.py     # Ollama client, compiler loop, validation, grounding
-├── context.py    # Workspace scanner (tree, key files, AST outlines)
+├── context.py    # Workspace scanner: tree, key files, relevance-packed outlines
+├── outline.py    # Symbol outlines (Python ast, JS/TS and Go regex)
+├── rank.py       # BM25 relevance ranking
+├── stats.py      # Token accounting, reduction %, gold-file recall
+├── telemetry.py  # TTFT, tokens/sec, peak GPU memory, hardware report
+├── tokens.py     # Token counters
 └── templates.py  # System prompt schema and stack rules
 ```
 

@@ -6,6 +6,7 @@ import pytest
 from typer.testing import CliRunner
 
 from promptpump.cli import app
+import promptpump.cli as cli_module
 from promptpump.context import outline_python, scan_workspace
 from promptpump.engine import (
     PromptCompiler,
@@ -18,11 +19,14 @@ from promptpump.templates import (
     UnknownStackError,
     build_system_prompt,
     get_stack,
+    list_stacks,
+    PromptMode,
+    get_required_tags,
 )
 
 
-def make_prompt(body: str = "content") -> str:
-    return "\n".join(f"<{t}>\n{body}\n</{t}>" for t in REQUIRED_TAGS)
+def make_prompt(body: str = "content", tags: tuple[str, ...] = REQUIRED_TAGS) -> str:
+    return "\n".join(f"<{t}>\n{body}\n</{t}>" for t in tags)
 
 
 class FakeClient:
@@ -67,9 +71,38 @@ def test_system_prompt_is_deterministic() -> None:
     assert build_system_prompt([get_stack("py")]) == build_system_prompt([get_stack("python")])
 
 
+def test_creative_system_prompts_use_distinct_schemas() -> None:
+    image = build_system_prompt(mode=PromptMode.IMAGE)
+    content = build_system_prompt(mode=PromptMode.CONTENT)
+    assert "composition_and_lighting" in image and "IMAGE PROMPT RULES" in image
+    assert "content_structure" in content and "stories, scripts" in content
+    assert "<codebase_context>" not in image + content
+    assert get_required_tags(PromptMode.IMAGE) != get_required_tags(PromptMode.CONTENT)
+
+
 def test_unknown_stack_raises() -> None:
     with pytest.raises(UnknownStackError):
         get_stack("cobol")
+
+
+def test_mainstream_stack_profiles_are_available_and_have_rules() -> None:
+    profiles = list_stacks()
+    names = {profile.name for profile in profiles}
+    assert len(profiles) >= 40
+    assert {
+        "python", "javascript", "typescript", "java", "kotlin", "csharp", "go", "rust",
+        "c", "cpp", "php", "ruby", "swift", "dart", "scala", "elixir", "r", "sql",
+        "bash", "spring", "aspnet", "angular", "vue", "svelte", "express", "nestjs",
+        "flask", "pydantic", "sqlalchemy", "redis", "celery", "graphql", "grpc",
+        "react-native", "electron", "postgresql", "mysql", "mongodb", "pandas", "scikit-learn", "tensorflow", "transformers",
+        "pytest", "playwright", "docker", "terraform",
+    } <= names
+    assert all(profile.rules for profile in profiles)
+    assert all(get_stack(alias).name == canonical for alias, canonical in {
+        "js": "javascript", "ts": "typescript", "golang": "go", "c++": "cpp",
+        "c#": "csharp", "dotnet": "csharp", "postgres": "postgresql", "mongo": "mongodb",
+        "sklearn": "scikit-learn",
+    }.items())
 
 
 # -- context -----------------------------------------------------------------------------
@@ -131,6 +164,23 @@ def test_compile_can_skip_grounding(workspace: Path) -> None:
     assert "<codebase_context>\nmodel text" in result.prompt
 
 
+def test_compile_image_prompt_uses_its_schema_without_code_grounding(workspace: Path) -> None:
+    client = FakeClient(make_prompt("cinematic scene", get_required_tags(PromptMode.IMAGE)))
+    result = PromptCompiler(client).compile(
+        "a fox in a snowy forest", scan_workspace(workspace), mode=PromptMode.IMAGE
+    )
+    assert result.is_valid and not result.grounded and result.issues == []
+    assert "<subject_and_scene>" in result.prompt
+    assert "<codebase_context>" not in client.calls[0][0]["content"]
+    assert "<workspace>" not in client.calls[0][1]["content"]
+
+
+def test_compile_rejects_stack_profiles_for_creative_modes(workspace: Path) -> None:
+    compiler = PromptCompiler(FakeClient())
+    with pytest.raises(PromptPumpError, match="only available for code"):
+        compiler.build_messages("draw a fox", scan_workspace(workspace), ["python"], "image")
+
+
 def test_compile_retries_when_tags_missing(workspace: Path) -> None:
     client = FakeClient("<role_definition>only</role_definition>", make_prompt())
     result = PromptCompiler(client).compile("x", scan_workspace(workspace))
@@ -158,6 +208,27 @@ def test_cli_dry_run(workspace: Path) -> None:
     )
     assert result.exit_code == 0
     assert "<shorthand_request>" in result.output and "add auth" in result.output
+
+
+def test_cli_image_dry_run_uses_image_schema_without_workspace_scan(tmp_path: Path) -> None:
+    result = CliRunner().invoke(
+        app, ["run", "a fox in a snowy forest", "--type", "image", "--path", str(tmp_path), "--dry-run"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "<subject_and_scene>" in result.output
+    assert "codebase_context" not in result.output
+
+
+def test_no_args_menu_selects_content_workflow(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        cli_module,
+        "OllamaClient",
+        lambda **_kwargs: FakeClient(make_prompt("a short adventure", get_required_tags("content"))),
+    )
+    result = CliRunner().invoke(app, [], input="3\na short adventure story\n")
+    assert result.exit_code == 0, result.output
+    assert "Content generation" in result.output
+    assert "<content_structure>" in result.output
 
 
 def test_cli_rejects_unknown_stack(workspace: Path) -> None:
