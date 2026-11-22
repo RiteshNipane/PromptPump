@@ -316,12 +316,40 @@ Reading it: decode speed, not input size, dominates the time. On this card the 1
 ### Your machine's full table
 
 <!-- promptpump:telemetry:start -->
-_Not generated yet. Run `promptpump telemetry --write-readme README.md` to fill in this table._
+- **Model:** qwen2.5-coder:14b 14.8B Q4_K_M
+- **GPU:** NVIDIA GeForce RTX 3050 6GB Laptop GPU (6,144 MiB)
+- **Model placement:** 4,017 of 10,317 MiB on GPU (39%), remainder on CPU/RAM
+- **CPU / RAM:** 12th Gen Intel(R) Core(TM) i5-12450HX / 15.8 GB
+- **OS / Ollama:** Windows-11-10.0.26200-SP0 / 0.40.16
+- **Runs:** 2 (1 warm), shorthand: `add input validation and clear error messages to the main entry point`
+
+| Metric | Cold start (run 1) | Warm median | Warm worst case |
+| --- | ---: | ---: | ---: |
+| TTFT (s) | 28.43 | 2.43 | 2.43 |
+| Decode speed (tokens/s) | 3.2 | 3.3 | 3.3 |
+| Time for the model call (s) | 246.86 | 212.77 | 212.77 |
+| Input tokens (model-side) | 4,075 | 4,075 | - |
+| Output tokens | 706 | 690 | - |
+| Peak GPU memory, absolute (MiB) | 5,021 | 5,005 | 5,005 |
+| Peak GPU memory, delta over pre-load idle (MiB) | 4,030 | 4,014 | 4,014 |
+
+_TTFT is wall-clock time from request to first streamed token (cold start includes model load). Decode speed is Ollama's `eval_count / eval_duration`; its worst case is the 5th percentile, latency worst cases are the 95th. GPU memory is read from `nvidia-smi` for the whole GPU, so use the delta column when other programs share it._
 <!-- promptpump:telemetry:end -->
+
+This current run measures `qwen2.5-coder:14b` Q4_K_M. Ollama reports 4,017 MiB of the
+10,317 MiB model allocation on the GPU (39%), with the rest on CPU/RAM. The peak and delta
+rows above come from `nvidia-smi` and describe the whole GPU. The earlier 14B value in the
+example table remains unrecorded because that historical run did not capture per-model
+placement.
 
 ## Evaluation status
 
-A downstream A/B benchmark (raw prompt vs. repo dump vs. PromptPump prompt, scored by passing tests) is planned for v0.2.0 and has **not been run yet**. Until it is, treat claims that structured prompts improve code generation as a hypothesis, not a result.
+**Automated test suite (2026-11-22):** `python -m pytest -q` — **82 passed** (2 dependency deprecation warnings).
+
+**Prompt-quality A/B evaluation:** not run. This repository has no benchmark dataset/harness
+that compares raw prompts with PromptPump prompts, so the test-suite result above is not a
+prompt-quality score. Treat claims that structured prompts improve code generation as a
+hypothesis until that benchmark is run.
 
 ---
 
