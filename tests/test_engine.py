@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from promptpump.cli import app
 import promptpump.cli as cli_module
+from promptpump.cli import app
 from promptpump.context import outline_python, scan_workspace
 from promptpump.engine import (
     PromptCompiler,
@@ -14,14 +14,15 @@ from promptpump.engine import (
     clean_response,
     find_missing_tags,
 )
+from promptpump.stack_profiles import resolve_stacks
 from promptpump.templates import (
     REQUIRED_TAGS,
+    PromptMode,
     UnknownStackError,
     build_system_prompt,
+    get_required_tags,
     get_stack,
     list_stacks,
-    PromptMode,
-    get_required_tags,
 )
 
 
@@ -83,6 +84,26 @@ def test_creative_system_prompts_use_distinct_schemas() -> None:
 def test_unknown_stack_raises() -> None:
     with pytest.raises(UnknownStackError):
         get_stack("cobol")
+
+
+def test_stack_aliases_are_case_normalized_and_deduplicated() -> None:
+    profiles = resolve_stacks([
+        "C++", "cpp", "Next", "nextjs", "NODE", "nodejs", "Py", "PYTHON",
+    ])
+    assert [profile.name for profile in profiles] == ["cpp", "nextjs", "node", "python"]
+    prompt = build_system_prompt(profiles)
+    assert prompt.count("[C++]") == 1
+    assert prompt.count("[Next.js]") == 1
+    assert prompt.count("[Node.js]") == 1
+    assert prompt.count("[Python]") == 1
+
+
+def test_templates_keeps_stack_public_imports() -> None:
+    from promptpump import templates
+
+    assert templates.get_stack("PY").name == "python"
+    assert "python" in templates.STACKS
+    assert templates.STACK_ALIASES["py"] == "python"
 
 
 def test_mainstream_stack_profiles_are_available_and_have_rules() -> None:
@@ -210,6 +231,16 @@ def test_cli_dry_run(workspace: Path) -> None:
     assert "<shorthand_request>" in result.output and "add auth" in result.output
 
 
+def test_cli_dry_run_emits_each_canonical_stack_once(tmp_path: Path) -> None:
+    result = CliRunner().invoke(
+        app,
+        ["run", "add a game loop", "--type", "code", "--stack", "C++", "--stack", "cpp",
+         "--path", str(tmp_path), "--dry-run"],
+    )
+    assert result.exit_code == 0, result.output
+    assert result.output.count("[C++]") == 1
+
+
 def test_cli_image_dry_run_uses_image_schema_without_workspace_scan(tmp_path: Path) -> None:
     result = CliRunner().invoke(
         app, ["run", "a fox in a snowy forest", "--type", "image", "--path", str(tmp_path), "--dry-run"]
@@ -217,6 +248,19 @@ def test_cli_image_dry_run_uses_image_schema_without_workspace_scan(tmp_path: Pa
     assert result.exit_code == 0, result.output
     assert "<subject_and_scene>" in result.output
     assert "codebase_context" not in result.output
+
+
+def test_cli_ignores_stack_with_warning_for_creative_mode(tmp_path: Path) -> None:
+    log = tmp_path / "run.log"
+    result = CliRunner().invoke(
+        app,
+        ["run", "a fox in a snowy forest", "--type", "image", "--stack", "not-a-stack",
+         "--path", str(tmp_path), "--dry-run", "--log", str(log)],
+    )
+    assert result.exit_code == 0, result.output
+    assert "warning" in result.output and "Ignoring --stack" in result.output
+    assert "STACK RULES" not in result.output
+    assert "Ignoring --stack" in log.read_text(encoding="utf-8")
 
 
 def test_no_args_menu_selects_content_workflow(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -229,6 +273,55 @@ def test_no_args_menu_selects_content_workflow(monkeypatch: pytest.MonkeyPatch) 
     assert result.exit_code == 0, result.output
     assert "Content generation" in result.output
     assert "<content_structure>" in result.output
+
+
+def test_menu_command_selects_image_workflow(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        cli_module,
+        "OllamaClient",
+        lambda **_kwargs: FakeClient(make_prompt("night scene", get_required_tags("image"))),
+    )
+    result = CliRunner().invoke(app, ["menu"], input="2\na moonlit night scene\n")
+    assert result.exit_code == 0, result.output
+    assert "<subject_and_scene>" in result.output
+
+
+def test_stacks_command_and_version() -> None:
+    runner = CliRunner()
+    stacks = runner.invoke(app, ["stacks"])
+    version = runner.invoke(app, ["--version"])
+    assert stacks.exit_code == 0 and "typescript" in stacks.output and "react-native" in stacks.output
+    assert version.exit_code == 0 and version.output.startswith("promptpump ")
+
+
+def test_doctor_command_uses_mocked_local_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeOllama:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def list_models(self) -> list[str]:
+            return ["qwen2.5-coder:7b"]
+
+    monkeypatch.setattr(cli_module, "OllamaClient", FakeOllama)
+    result = CliRunner().invoke(app, ["doctor", "--model", "qwen2.5-coder:7b"])
+    assert result.exit_code == 0, result.output
+    assert "Ollama reachable" in result.output and "is installed" in result.output
+
+
+def test_telemetry_command_with_mocked_components(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        cli_module, "OllamaClient", lambda **_kwargs: SimpleNamespace(model="fake-model")
+    )
+    monkeypatch.setattr(cli_module, "run_telemetry", lambda **_kwargs: [])
+    monkeypatch.setattr(cli_module, "collect_hardware", lambda _client: {})
+    monkeypatch.setattr(cli_module, "render_markdown", lambda _report: "# mocked telemetry")
+    result = CliRunner().invoke(
+        app, ["telemetry", "--path", str(tmp_path), "--runs", "2"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "# mocked telemetry" in result.output
 
 
 def test_cli_rejects_unknown_stack(workspace: Path) -> None:

@@ -166,6 +166,14 @@ Python modules (public API):
 <expected_output_format> ... </expected_output_format>
 ```
 
+Creative modes use different sections. For example, `--type image` structures visual subject,
+style, composition, and lighting, while `--type content` structures audience, format, and voice.
+Neither mode includes codebase context:
+
+```bash
+promptpump run "a fox in a snowy forest at dusk" --type image
+```
+
 ---
 
 ## Command reference
@@ -231,11 +239,11 @@ playwright`.
 
 **Built to be as deterministic as a local LLM allows**
 
-- Fixed system prompt and stack rules, temperature `0.2`, fixed seed (outputs can still vary a little between runs).
-- Output validated against seven required sections: `role_definition`, `task_objective`, `codebase_context`, `architectural_specifications`, `implementation_steps`, `constraints_and_guardrails`, `expected_output_format`.
-- Filler text, reasoning blocks, and wrapping code fences are stripped.
-- The `<codebase_context>` section is overwritten with real scan data so the model cannot invent files.
-- Files and `backticked` functions named in the compiled prompt are checked against your repo; a function attributed to the wrong file, or a plan that edits tests/evaluation code your request never mentioned, is flagged as a warning (the prompt itself is never altered).
+- All modes use a fixed seed and low temperature; model outputs can still vary between runs.
+- **Code mode** scans the selected workspace, validates its seven-section schema, grounds `<codebase_context>` in scan facts, and warns about unsupported file/function references or unrequested test/evaluation edits.
+- **Image mode** validates image-specific sections for subject/scene, visual style, composition/lighting, and constraints. It skips workspace scanning, code grounding, and code-reference warnings.
+- **Content mode** validates sections for audience/context, content structure, voice/style, and boundaries. It also skips workspace scanning, code grounding, and code-reference warnings.
+- Filler text, reasoning blocks, and wrapping code fences are stripped in every mode. Missing required sections trigger one repair attempt.
 
 **Safe by default**
 
@@ -297,7 +305,11 @@ Nov 2026, PromptPump 0.2.0.dev0, Ollama 0.40.16, Windows 11, Intel Core i5-12450
 | Time for the model call, cold start (s) | 53.0 | 217.3 |
 | Output tokens, warm median | 464 | 533 |
 | Peak GPU memory, whole GPU (MiB) | 4,666 | 4,619 |
-| Share of model on GPU | 79% | not recorded |
+| Share of model on GPU | 79% | not recorded* |
+
+\* The 14B share was not captured in that historical run. The README does not retain the
+per-model GPU placement value required to calculate it, and whole-GPU peak memory cannot
+determine the model's share reliably, so the value is left unestimated.
 
 Reading it: decode speed, not input size, dominates the time. On this card the 14B model does not fit in VRAM and runs partly on the CPU, so it is about six times slower than the 7B for the same task. Output length also differed between runs even with a fixed seed, so repeated runs are similar but not identical. Faster GPUs with more VRAM will look very different; run the command above for your own numbers.
 
@@ -352,7 +364,7 @@ pytest
 
 ```text
 promptpump/
-├── cli.py        # Typer CLI (run, stacks, doctor)
+├── cli.py        # Typer CLI (run, menu, stacks, doctor, telemetry, --version)
 ├── engine.py     # Ollama client, compiler loop, validation, grounding
 ├── context.py    # Workspace scanner: tree, key files, relevance-packed outlines
 ├── outline.py    # Symbol outlines (Python ast, JS/TS and Go regex)
@@ -360,10 +372,11 @@ promptpump/
 ├── stats.py      # Token accounting, reduction %, gold-file recall
 ├── telemetry.py  # TTFT, tokens/sec, peak GPU memory, hardware report
 ├── tokens.py     # Token counters
-└── templates.py  # System prompt schema and stack rules
+├── templates.py  # Prompt mode schemas and system prompt assembly
+└── stack_profiles.py  # Stack definitions, aliases, and canonical resolution
 ```
 
-Adding a stack is one entry in `templates.py`. Pull requests and issues are welcome.
+Adding a stack is one entry in `stack_profiles.py`. Pull requests and issues are welcome.
 
 ## License
 

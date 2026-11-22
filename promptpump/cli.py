@@ -23,6 +23,7 @@ from .engine import (
     PromptCompiler,
     PromptPumpError,
 )
+from .stack_profiles import resolve_stacks
 from .stats import compute_stats, format_stats
 from .telemetry import (
     TelemetryReport,
@@ -31,7 +32,7 @@ from .telemetry import (
     run_telemetry,
     update_readme,
 )
-from .templates import PromptMode, UnknownStackError, get_stack, list_stacks
+from .templates import PromptMode, UnknownStackError, list_stacks
 from .tokens import TokenCounter, get_counter
 
 DEFAULT_TELEMETRY_PROMPT = "add input validation and clear error messages to the main entry point"
@@ -213,14 +214,18 @@ def run(
     _notes.clear()
     if log:
         ctx.call_on_close(lambda: log.write_text("\n".join(_notes) + "\n", encoding="utf-8"))
-    try:
-        profiles = [get_stack(s) for s in stack or []]
-    except UnknownStackError as exc:
-        note(f"[red]error:[/red] {escape(str(exc))}")
-        raise typer.Exit(2) from exc
-    if profiles and prompt_type is not PromptMode.CODE:
-        note("[red]error:[/red] --stack profiles can only be used with --type code.")
-        raise typer.Exit(2)
+    if stack and prompt_type is not PromptMode.CODE:
+        note(
+            f"[yellow]warning:[/yellow] Ignoring --stack for --type {prompt_type.value}; "
+            "stack profiles apply only to code prompts."
+        )
+        profiles = []
+    else:
+        try:
+            profiles = resolve_stacks(stack or [])
+        except UnknownStackError as exc:
+            note(f"[red]error:[/red] {escape(str(exc))}")
+            raise typer.Exit(2) from exc
     counter = _counter_or_exit(tokenizer)
 
     if prompt_type is PromptMode.CODE:
@@ -331,7 +336,7 @@ def telemetry(
 ) -> None:
     """Measure TTFT, tokens/sec, token counts, and peak GPU memory on this machine."""
     try:
-        stack_names = [get_stack(s).name for s in stack or []]
+        stack_names = [profile.name for profile in resolve_stacks(stack or [])]
     except UnknownStackError as exc:
         err.print(f"[red]error:[/red] {escape(str(exc))}")
         raise typer.Exit(2) from exc

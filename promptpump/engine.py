@@ -11,16 +11,16 @@ from typing import Protocol, Sequence
 import requests
 
 from .context import WorkspaceContext
+from .stack_profiles import resolve_stacks
 from .telemetry import InferenceMetrics
-from .verify import Issue, check_references
 from .templates import (
     REQUIRED_TAGS,
     PromptMode,
     build_system_prompt,
     build_user_message,
-    get_stack,
     get_required_tags,
 )
+from .verify import Issue, check_references
 
 DEFAULT_MODEL = "qwen2.5-coder:7b"
 DEFAULT_HOST = "http://localhost:11434"
@@ -255,7 +255,7 @@ class PromptCompiler:
         selected_mode = PromptMode(mode)
         if stacks and selected_mode is not PromptMode.CODE:
             raise PromptPumpError("--stack profiles are only available for code prompts.")
-        profiles = list(dict.fromkeys(get_stack(s) for s in stacks))
+        profiles = resolve_stacks(stacks)
         return [
             {"role": "system", "content": build_system_prompt(profiles, selected_mode)},
             {
