@@ -148,6 +148,10 @@ promptpump run "add caching" --dry-run
 promptpump run "write tests for utils" -m qwen2.5-coder:14b --host http://192.168.1.20:11434
 ```
 
+#### Interactive image-generation example
+
+![PromptPump selecting an installed Ollama model and enhancing an image-generation prompt](docs/images/interactive-image-generation-example.png)
+
 ### Example output (abridged)
 
 Input: `promptpump run "add source citations to each RAG answer" --stack fastapi`
