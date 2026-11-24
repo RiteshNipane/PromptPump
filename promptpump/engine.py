@@ -11,6 +11,8 @@ from typing import Protocol, Sequence
 import requests
 
 from .context import WorkspaceContext
+from .config import DEFAULT_MODEL, get_model_preference
+from .model_selection import select_installed_model
 from .stack_profiles import resolve_stacks
 from .telemetry import InferenceMetrics
 from .templates import (
@@ -22,7 +24,6 @@ from .templates import (
 )
 from .verify import Issue, check_references
 
-DEFAULT_MODEL = "qwen2.5-coder:7b"
 DEFAULT_HOST = "http://localhost:11434"
 
 Message = dict[str, str]
@@ -51,7 +52,7 @@ class OllamaClient:
     def __init__(
         self,
         host: str = DEFAULT_HOST,
-        model: str = DEFAULT_MODEL,
+        model: str | None = None,
         *,
         timeout: float = 300.0,
         temperature: float = 0.2,
@@ -59,11 +60,42 @@ class OllamaClient:
         num_ctx: int = 8192,
     ) -> None:
         self.host = host.rstrip("/")
-        self.model = model
+        self.model = get_model_preference(model)
+        self.requested_model = self.model
+        self.auto_select_model = model is None
+        self.model_was_fallback = False
+        self._model_resolved = False
         self.timeout = timeout
         # Low temperature + fixed seed keeps runs as reproducible as a local LLM allows.
         self.options = {"temperature": temperature, "seed": seed, "num_ctx": num_ctx}
         self.last_metrics: InferenceMetrics | None = None
+
+    def resolve_model(
+        self, *, prompt_type: str = "code", auto_fallback: bool | None = None
+    ) -> str:
+        """Select an installed chat model, falling back when the requested model is absent."""
+        if self._model_resolved:
+            return self.model
+
+        if auto_fallback is None:
+            auto_fallback = self.auto_select_model
+        installed = self.list_models()
+        selected = select_installed_model(installed, self.model, prompt_type=prompt_type)
+        if selected is None:
+            raise OllamaError(
+                "No Ollama chat models are installed. Install one with `ollama pull "
+                "qwen2.5-coder:7b` or `ollama pull deepseek-r1:8b`, then retry."
+            )
+        if selected != self.model and not auto_fallback:
+            raise OllamaError(
+                f"Model '{self.model}' is not installed. Available chat models: "
+                f"{', '.join(installed)}. Choose one with --model or PROMPTPUMP_MODEL."
+            )
+
+        self.model_was_fallback = selected != self.model
+        self.model = selected
+        self._model_resolved = True
+        return selected
 
     def _ollama_error(self, text: str, status: int | None = None) -> OllamaError:
         """Turn an Ollama error body into an actionable message."""
@@ -78,6 +110,8 @@ class OllamaClient:
 
     def chat(self, messages: list[Message]) -> str:
         """Stream a reply, record :attr:`last_metrics`, and return the full text."""
+        if not self._model_resolved and self.auto_select_model:
+            self.resolve_model()
         payload = {
             "model": self.model,
             "messages": messages,

@@ -14,6 +14,7 @@ from rich.table import Table
 from rich.text import Text
 
 from . import __version__
+from .config import get_model_preference, set_model_preference
 from .context import WorkspaceContext, scan_workspace
 from .engine import (
     DEFAULT_HOST,
@@ -23,6 +24,7 @@ from .engine import (
     PromptCompiler,
     PromptPumpError,
 )
+from .model_selection import available_chat_models, select_installed_model
 from .stack_profiles import resolve_stacks
 from .stats import compute_stats, format_stats
 from .telemetry import (
@@ -132,6 +134,64 @@ def _print_model_stats(result: CompileResult) -> None:
     )
 
 
+def _resolve_client_model(client: object, *, prompt_type: PromptMode = PromptMode.CODE) -> str | None:
+    """Resolve an installed model when the client supports local-model discovery."""
+    resolver = getattr(client, "resolve_model", None)
+    if not callable(resolver):  # Keep lightweight application clients and test doubles usable.
+        return getattr(client, "model", None)
+    requested = getattr(client, "model", DEFAULT_MODEL)
+    try:
+        selected = resolver(prompt_type=prompt_type.value, auto_fallback=True)
+    except PromptPumpError as exc:
+        note(f"[red]error:[/red] {escape(str(exc))}")
+        raise typer.Exit(1) from exc
+    if selected != requested:
+        note(
+            f"[yellow]Model '{requested}' is not installed; using available model "
+            f"'{selected}'.[/yellow]"
+        )
+    return selected
+
+
+def _prompt_model_choice(models: list[str], preferred: str) -> str:
+    """Ask the interactive user to choose an installed chat model."""
+    err.print("[bold]Installed Ollama chat models[/bold]")
+    for index, name in enumerate(models, start=1):
+        marker = " [green](current)[/green]" if name == preferred else ""
+        err.print(f"  [bold]{index}[/bold]  {escape(name)}{marker}")
+    default_model = select_installed_model(models, preferred) or models[0]
+    default_index = models.index(default_model) + 1
+    selected = typer.prompt("Select model", type=int, default=default_index)
+    if not 1 <= selected <= len(models):
+        err.print(f"[red]Choose a number from 1 to {len(models)}.[/red]")
+        raise typer.Exit(2)
+    return models[selected - 1]
+
+
+def _choose_model_in_menu() -> str | None:
+    """Offer model selection in the interactive entry flow when Ollama has alternatives."""
+    client = OllamaClient()
+    list_models = getattr(client, "list_models", None)
+    if not callable(list_models):  # Keep small application clients and test doubles compatible.
+        return None
+    try:
+        models = available_chat_models(list_models())
+    except PromptPumpError:
+        return None
+    if len(models) < 2:
+        return models[0] if models else None
+
+    preferred = get_model_preference()
+    selected = _prompt_model_choice(models, preferred)
+    try:
+        set_model_preference(selected)
+    except OSError as exc:
+        err.print(f"[yellow]Could not save the model preference: {escape(str(exc))}[/yellow]")
+    else:
+        note(f"[green]Using Ollama model {escape(selected)}.[/green]")
+    return selected
+
+
 @app.callback()
 def main(
     ctx: typer.Context,
@@ -167,8 +227,12 @@ def run(
                      help="Project directory to scan in code mode."),
     ] = Path("."),
     model: Annotated[
-        str, typer.Option("--model", "-m", envvar="PROMPTPUMP_MODEL", help="Ollama model name.")
-    ] = DEFAULT_MODEL,
+        Optional[str],
+        typer.Option(
+            "--model", "-m",
+            help="Ollama model override; use `promptpump model` to save a default.",
+        ),
+    ] = None,
     host: Annotated[
         str, typer.Option("--host", envvar="PROMPTPUMP_HOST", help="Ollama base URL.")
     ] = DEFAULT_HOST,
@@ -247,9 +311,12 @@ def run(
     elif stats:
         note("[dim]Workspace token statistics are available only for code prompts.[/dim]")
 
-    compiler = PromptCompiler(
-        OllamaClient(host=host, model=model, timeout=timeout, num_ctx=num_ctx), ground_context=ground
-    )
+    client = OllamaClient(host=host, model=model, timeout=timeout, num_ctx=num_ctx)
+    if not dry_run:
+        selected_model = _resolve_client_model(client, prompt_type=prompt_type)
+        if selected_model:
+            model = selected_model
+    compiler = PromptCompiler(client, ground_context=ground)
     stack_names = [p.name for p in profiles]
 
     if dry_run:
@@ -293,6 +360,7 @@ def run(
 
 def _interactive_menu(ctx: typer.Context) -> None:
     """Show the entry menu and invoke the selected enhancement workflow."""
+    selected_model = _choose_model_in_menu()
     err.print("[bold cyan]PromptPump[/bold cyan] — choose what kind of prompt to enhance")
     err.print("  [bold]1[/bold]  Code generation")
     err.print("  [bold]2[/bold]  Image generation")
@@ -304,7 +372,7 @@ def _interactive_menu(ctx: typer.Context) -> None:
         raise typer.Exit(2)
     mode = modes[selected]
     shorthand = typer.prompt("Describe what you want the prompt to produce")
-    ctx.invoke(run, ctx=ctx, prompt=shorthand, prompt_type=mode)
+    ctx.invoke(run, ctx=ctx, prompt=shorthand, prompt_type=mode, model=selected_model)
 
 
 @app.command()
@@ -320,7 +388,9 @@ def telemetry(
         typer.Option("--path", "-p", exists=True, file_okay=False, resolve_path=True,
                      help="Project directory used as the benchmark workload."),
     ] = Path("."),
-    model: Annotated[str, typer.Option("--model", "-m", envvar="PROMPTPUMP_MODEL")] = DEFAULT_MODEL,
+    model: Annotated[
+        Optional[str], typer.Option("--model", "-m")
+    ] = None,
     host: Annotated[str, typer.Option("--host", envvar="PROMPTPUMP_HOST")] = DEFAULT_HOST,
     runs: Annotated[int, typer.Option(min=2, help="Total runs (first is a cold start).")] = 10,
     prompt: Annotated[str, typer.Option(help="Shorthand prompt to compile.")] = DEFAULT_TELEMETRY_PROMPT,
@@ -342,6 +412,7 @@ def telemetry(
         raise typer.Exit(2) from exc
 
     client = OllamaClient(host=host, model=model, timeout=timeout, num_ctx=num_ctx)
+    _resolve_client_model(client)
     compiler = PromptCompiler(client, verify=False)
     context = scan_workspace(path, max_tokens=max_context_tokens, query=prompt)
     try:
@@ -382,9 +453,84 @@ def stacks() -> None:
     Console().print(table)
 
 
+@app.command("model")
+def model_command(
+    name: Annotated[
+        Optional[str], typer.Argument(help="Installed Ollama model name to save as the default.")
+    ] = None,
+    list_only: Annotated[
+        bool, typer.Option("--list", help="List installed chat models without changing the default.")
+    ] = False,
+    host: Annotated[str, typer.Option("--host", envvar="PROMPTPUMP_HOST")] = DEFAULT_HOST,
+) -> None:
+    """List, interactively choose, or save the current Ollama model."""
+    client = OllamaClient(host=host)
+    try:
+        models = available_chat_models(client.list_models())
+    except PromptPumpError as exc:
+        err.print(f"[red]error:[/red] {escape(str(exc))} Start Ollama with `ollama serve`.")
+        raise typer.Exit(1) from exc
+
+    if not models:
+        err.print(
+            "[red]No Ollama chat models are installed.[/red] Install one, for example: "
+            "`ollama pull deepseek-r1:8b`."
+        )
+        raise typer.Exit(1)
+
+    current = get_model_preference()
+    if list_only:
+        table = Table("Installed chat model", "Current preference")
+        for installed_model in models:
+            table.add_row(installed_model, "yes" if installed_model == current else "")
+        Console().print(table)
+        return
+
+    selected: str
+    if name:
+        key = name.strip().lower()
+        matches = [
+            installed_model
+            for installed_model in models
+            if installed_model.lower() == key
+            or installed_model.lower().removesuffix(":latest") == key.removesuffix(":latest")
+        ]
+        if not matches:
+            family = key.split(":", maxsplit=1)[0]
+            matches = [
+                installed_model
+                for installed_model in models
+                if installed_model.lower().split(":", maxsplit=1)[0] == family
+            ]
+        if len(matches) == 1:
+            selected = matches[0]
+        elif len(matches) > 1:
+            selected = _prompt_model_choice(matches, current)
+        else:
+            err.print(
+                f"[red]Model '{escape(name)}' is not installed.[/red] Use `promptpump model --list` "
+                "to see available chat models."
+            )
+            raise typer.Exit(2)
+    elif len(models) == 1:
+        selected = models[0]
+    else:
+        selected = _prompt_model_choice(models, current)
+
+    try:
+        settings_path = set_model_preference(selected)
+    except OSError as exc:
+        err.print(f"[red]Could not save model preference:[/red] {escape(str(exc))}")
+        raise typer.Exit(1) from exc
+    err.print(f"[green]Current model set to {escape(selected)}.[/green]")
+    err.print(f"[dim]Saved in {escape(str(settings_path))}[/dim]")
+
+
 @app.command()
 def doctor(
-    model: Annotated[str, typer.Option("--model", "-m", envvar="PROMPTPUMP_MODEL")] = DEFAULT_MODEL,
+    model: Annotated[
+        Optional[str], typer.Option("--model", "-m")
+    ] = None,
     host: Annotated[str, typer.Option("--host", envvar="PROMPTPUMP_HOST")] = DEFAULT_HOST,
 ) -> None:
     """Check that Ollama is reachable and the model is installed."""
@@ -394,12 +540,19 @@ def doctor(
     except PromptPumpError as exc:
         err.print(f"[red]x[/red] {escape(str(exc))} Start it with `ollama serve`.")
         raise typer.Exit(1) from exc
-    err.print(f"[green]ok[/green] Ollama reachable at {host}")
-    if any(name == model or name.split(":")[0] == model for name in installed):
-        err.print(f"[green]ok[/green] Model '{model}' is installed")
-    else:
-        err.print(f"[red]x[/red] Model '{model}' missing. Run: ollama pull {model}")
+    preferred = get_model_preference(model)
+    selected = select_installed_model(installed, preferred)
+    if selected is None:
+        err.print(
+            "[red]x[/red] No Ollama chat models are installed. Install one with "
+            "`ollama pull qwen2.5-coder:7b` or `ollama pull deepseek-r1:8b`."
+        )
         raise typer.Exit(1)
+    if selected != preferred:
+        err.print(f"[yellow]Model '{preferred}' is not installed; using '{selected}'.[/yellow]")
+    model = selected
+    err.print(f"[green]ok[/green] Ollama reachable at {host}")
+    err.print(f"[green]ok[/green] Model '{model}' is installed and ready")
 
 
 if __name__ == "__main__":

@@ -55,12 +55,18 @@ guarantee those outcomes; see the small code-generation pilot under [Evaluation 
 
 **Requirements:** Python 3.10+ and [Ollama](https://ollama.com/download) (Windows, macOS, Linux).
 
-### 1. Get a local model
+### 1. Install any local Ollama chat model
 
 ```bash
-ollama pull qwen2.5-coder:7b      # fast: ~19 tokens/s on a 6 GB laptop GPU (see Performance)
-ollama pull qwen2.5-coder:14b     # stronger instruction-following in informal tests (~9 GB); ~6x slower on a 6 GB GPU
+ollama list                         # use a model you already have
+ollama pull qwen2.5-coder:7b       # optional code-focused choice
+# or: ollama pull deepseek-r1:8b    # optional reasoning-model choice
 ```
+
+PromptPump checks Ollama for installed chat models. It prefers the configured model when it is
+available; if not, it automatically selects an installed alternative such as DeepSeek-R1. It does
+not download models for you. See the [Ollama model and VRAM guide](https://github.com/RiteshNipane/PromptPump/blob/main/docs/ollama-models.md) for
+popular choices across 4–32 GB GPUs.
 
 ### 2. Install PromptPump
 
@@ -88,10 +94,11 @@ Plain pip works too: `pip install promptpump`. Linux clipboard support needs `xc
 
 ```bash
 promptpump --version
-promptpump doctor        # checks Ollama is running and your model is installed
+promptpump doctor        # checks Ollama and reports the selected installed model
+promptpump model --list  # lists installed chat models
 ```
 
-To use the 14B model by default: `setx PROMPTPUMP_MODEL "qwen2.5-coder:14b"` (Windows, then reopen the terminal) or `export PROMPTPUMP_MODEL=qwen2.5-coder:14b` (macOS/Linux).
+Use `promptpump model` to choose and save the current model, or `promptpump model deepseek-r1:14b` to set one directly. When you start the interactive menu and multiple chat models are installed, PromptPump asks which one to use. The saved preference is stored in `~/.promptpump/config.json`. An explicit `--model` overrides the saved choice. `PROMPTPUMP_MODEL` supplies the initial preference when no model has been saved. If the requested model is missing, PromptPump reports and uses another installed chat model.
 
 ---
 
@@ -106,7 +113,8 @@ promptpump run "add jwt auth to the api" --stack fastapi --stack python
 
 The compiled prompt is printed and copied to your clipboard. Paste it into your AI assistant.
 
-Run `promptpump` with no arguments to open the interactive menu. You can also choose a mode
+Run `promptpump` with no arguments to open the interactive menu. If Ollama has multiple chat
+models, the menu asks which one to use before you choose a prompt type. You can also choose a mode
 directly:
 
 ```bash
@@ -183,6 +191,9 @@ promptpump run "a fox in a snowy forest at dusk" --type image
 | --- | --- |
 | `promptpump run "<prompt>"` | Compile a shorthand prompt into a master prompt |
 | `promptpump` or `promptpump menu` | Open the interactive code/image/content selector |
+| `promptpump model` | Interactively choose and save the current installed model |
+| `promptpump model <name>` | Set a specific installed chat model as the saved default |
+| `promptpump model --list` | List installed chat models |
 | `promptpump stacks` | List available stack profiles |
 | `promptpump doctor` | Check Ollama connectivity and model availability |
 | `promptpump telemetry` | Measure TTFT, tokens/sec, token counts, and peak GPU memory on your machine |
@@ -196,7 +207,7 @@ promptpump run "a fox in a snowy forest at dusk" --type image
 | `--stack`, `-s` | none | Inject stack rules; repeatable |
 | `--copy / --no-copy` | copy | Copy the result to the clipboard |
 | `--path`, `-p` | `.` | Project directory to scan |
-| `--model`, `-m` | `qwen2.5-coder:7b` | Ollama model (env `PROMPTPUMP_MODEL`) |
+| `--model`, `-m` | saved model or `qwen2.5-coder:7b` | Per-run Ollama model override; uses `PROMPTPUMP_MODEL` as the initial preference when nothing is saved, then falls back to an installed chat model if unavailable |
 | `--host` | `http://localhost:11434` | Ollama URL (env `PROMPTPUMP_HOST`) |
 | `--max-context-tokens` | `3000` | Budget for the workspace snapshot |
 | `--ground / --no-ground` | ground | Overwrite `<codebase_context>` with deterministic scan facts |
@@ -388,7 +399,7 @@ Reproduce with `python benchmarks/prompt_quality/run.py --model qwen2.5-coder:7b
 | `Ollama ran out of memory` | Run `ollama ps`, then `ollama stop <model>` for models you are not using; close heavy apps; use a smaller model or `--num-ctx 6144` |
 | Garbled characters (`Γö£ΓÇÉ`) or `NativeCommandError` after `> file` / `2> file` in Windows PowerShell 5.1 | PowerShell re-encodes redirected output. Use `--output prompt.md` and `--log notes.txt` instead: PromptPump writes both files itself as UTF-8 |
 | `Cannot reach Ollama` | Start it with `ollama serve` (or open the Ollama app) and run `promptpump doctor` |
-| `Model ... not found` | `ollama pull qwen2.5-coder:7b` (or the model you chose) |
+| No Ollama chat model is installed | Install any chat model, such as `ollama pull deepseek-r1:8b`; PromptPump discovers it automatically |
 | Timeout on a slow machine | Add `--timeout 900`, or use the 7B model |
 | Clipboard unavailable (Linux) | `sudo apt install xclip` |
 | Output has missing sections | Try the 14B model or rephrase the shorthand |
