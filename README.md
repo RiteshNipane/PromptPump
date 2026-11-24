@@ -98,7 +98,7 @@ promptpump doctor        # checks Ollama and reports the selected installed mode
 promptpump model --list  # lists installed chat models
 ```
 
-Use `promptpump model` to choose and save the current model, or `promptpump model deepseek-r1:14b` to set one directly. When you start the interactive menu and multiple chat models are installed, PromptPump asks which one to use. The saved preference is stored in `~/.promptpump/config.json`. An explicit `--model` overrides the saved choice. `PROMPTPUMP_MODEL` supplies the initial preference when no model has been saved. If the requested model is missing, PromptPump reports and uses another installed chat model.
+Use `promptpump model` to choose and save the current model, or `promptpump model deepseek-r1:14b` to set one directly. The interactive menu and interactive `promptpump run` ask which model to use when multiple chat models are installed. Noninteractive runs select an installed model automatically. The saved preference is stored in `~/.promptpump/config.json`. An explicit `--model` overrides the saved choice. `PROMPTPUMP_MODEL` supplies the initial preference when no model has been saved. If the requested model is missing, PromptPump reports and uses another installed chat model.
 
 ---
 
@@ -127,7 +127,7 @@ continues to use workspace context. Use an instruction-following Ollama model su
 creative prompting (for example, `--model qwen2.5:7b` if installed); PromptPump enhances
 prompts and does not generate the final image or story itself.
 
-Local models can take a minute or two on CPU. Use `--timeout 900` for big models on slow machines.
+Local models can take a minute or two on CPU. If a run takes over two minutes (or approaches its timeout), PromptPump suggests switching models. After a run, it also suggests a smaller installed model when decode speed is below 5 tokens/s. Use `promptpump model` to select one, or `--timeout 900` for big models on slow machines.
 
 ### Examples
 
@@ -401,6 +401,7 @@ Reproduce with `python benchmarks/prompt_quality/run.py --model qwen2.5-coder:7b
 | `Cannot reach Ollama` | Start it with `ollama serve` (or open the Ollama app) and run `promptpump doctor` |
 | No Ollama chat model is installed | Install any chat model, such as `ollama pull deepseek-r1:8b`; PromptPump discovers it automatically |
 | Timeout on a slow machine | Add `--timeout 900`, or use the 7B model |
+| Slow generation or low tokens/sec | Use the suggested smaller installed model with `promptpump model <name>`, or run `promptpump model` to choose interactively |
 | Clipboard unavailable (Linux) | `sudo apt install xclip` |
 | Output has missing sections | Try the 14B model or rephrase the shorthand |
 | Scan looks wrong | You're probably in the wrong folder; `cd` into the project or pass `--path` |

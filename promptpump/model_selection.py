@@ -123,3 +123,25 @@ def select_installed_model(
     return min(
         candidates, key=lambda name: (category(name), family_priority(name), *size_priority(name))
     )
+
+
+def suggest_smaller_model(installed: Iterable[str], current: str) -> str | None:
+    """Suggest the closest smaller installed model, preferring the current family."""
+    current_size = _parameter_billions(current)
+    if current_size is None:
+        return None
+
+    smaller = [
+        name
+        for name in available_chat_models(installed)
+        if name != current
+        and (size := _parameter_billions(name)) is not None
+        and size < current_size
+    ]
+    if not smaller:
+        return None
+
+    family = _family(current)
+    same_family = [name for name in smaller if _family(name) == family]
+    choices = same_family or smaller
+    return max(choices, key=lambda name: _parameter_billions(name) or 0.0)

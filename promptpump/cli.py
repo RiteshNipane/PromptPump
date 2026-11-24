@@ -2,6 +2,7 @@
 
 import json
 import sys
+import threading
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -24,7 +25,11 @@ from .engine import (
     PromptCompiler,
     PromptPumpError,
 )
-from .model_selection import available_chat_models, select_installed_model
+from .model_selection import (
+    available_chat_models,
+    select_installed_model,
+    suggest_smaller_model,
+)
 from .stack_profiles import resolve_stacks
 from .stats import compute_stats, format_stats
 from .telemetry import (
@@ -38,6 +43,8 @@ from .templates import PromptMode, UnknownStackError, list_stacks
 from .tokens import TokenCounter, get_counter
 
 DEFAULT_TELEMETRY_PROMPT = "add input validation and clear error messages to the main entry point"
+SLOW_COMPILE_SECONDS = 120.0
+SLOW_DECODE_TOKENS_PER_SECOND = 5.0
 
 app = typer.Typer(
     name="promptpump",
@@ -155,7 +162,7 @@ def _resolve_client_model(client: object, *, prompt_type: PromptMode = PromptMod
 
 def _prompt_model_choice(models: list[str], preferred: str) -> str:
     """Ask the interactive user to choose an installed chat model."""
-    err.print("[bold]Installed Ollama chat models[/bold]")
+    err.print("[bold]Multiple Ollama chat models found. Choose which one to use:[/bold]")
     for index, name in enumerate(models, start=1):
         marker = " [green](current)[/green]" if name == preferred else ""
         err.print(f"  [bold]{index}[/bold]  {escape(name)}{marker}")
@@ -168,9 +175,9 @@ def _prompt_model_choice(models: list[str], preferred: str) -> str:
     return models[selected - 1]
 
 
-def _choose_model_in_menu() -> str | None:
+def _choose_model_in_menu(host: str = DEFAULT_HOST) -> str | None:
     """Offer model selection in the interactive entry flow when Ollama has alternatives."""
-    client = OllamaClient()
+    client = OllamaClient(host=host)
     list_models = getattr(client, "list_models", None)
     if not callable(list_models):  # Keep small application clients and test doubles compatible.
         return None
@@ -190,6 +197,49 @@ def _choose_model_in_menu() -> str | None:
     else:
         note(f"[green]Using Ollama model {escape(selected)}.[/green]")
     return selected
+
+
+def _warn_if_slow(
+    result: CompileResult,
+    elapsed: float,
+    client: OllamaClient,
+    *,
+    already_notified: bool = False,
+) -> None:
+    """Suggest switching to a smaller model when a compile is slow for this machine."""
+    metric = result.metrics[-1] if result.metrics else None
+    decode_speed = metric.tokens_per_s if metric else None
+    slow_by_time = elapsed >= SLOW_COMPILE_SECONDS
+    slow_by_decode = (
+        decode_speed is not None and decode_speed < SLOW_DECODE_TOKENS_PER_SECOND
+    )
+    if not (slow_by_time or slow_by_decode) or (already_notified and not slow_by_decode):
+        return
+
+    reasons: list[str] = []
+    if slow_by_time and not already_notified:
+        reasons.append(f"this compile took {elapsed:.1f}s")
+    if slow_by_decode:
+        reasons.append(f"decode speed was {decode_speed:.1f} tokens/s")
+
+    try:
+        smaller = suggest_smaller_model(client.list_models(), result.model)
+    except PromptPumpError:
+        smaller = None
+    if smaller:
+        advice = (
+            f"Try the smaller installed model '{smaller}' with "
+            f"`promptpump model {smaller}`."
+        )
+    else:
+        advice = (
+            "Try `promptpump model` to choose a smaller installed model; install one first "
+            "if no smaller option is listed."
+        )
+    note(
+        "[yellow]Performance is slow: "
+        f"{'; '.join(reasons)}. {advice}[/yellow]"
+    )
 
 
 @app.callback()
@@ -278,6 +328,13 @@ def run(
     _notes.clear()
     if log:
         ctx.call_on_close(lambda: log.write_text("\n".join(_notes) + "\n", encoding="utf-8"))
+    if (
+        model is None
+        and not dry_run
+        and not ctx.meta.get("promptpump_model_selection_checked")
+        and sys.stdin.isatty()
+    ):
+        model = _choose_model_in_menu(host)
     if stack and prompt_type is not PromptMode.CODE:
         note(
             f"[yellow]warning:[/yellow] Ignoring --stack for --type {prompt_type.value}; "
@@ -328,13 +385,35 @@ def run(
         raise typer.Exit()
 
     start = time.perf_counter()
+    notice_after = max(1.0, min(SLOW_COMPILE_SECONDS, timeout * 0.8))
+
+    slow_notice_displayed = threading.Event()
+
+    def announce_slow_compile() -> None:
+        slow_notice_displayed.set()
+        note(
+            "[yellow]This model is taking a while. If it continues, switch to a smaller "
+            "installed model with `promptpump model`; install one first if needed.[/yellow]"
+        )
+
+    slow_notice = threading.Timer(
+        notice_after,
+        announce_slow_compile,
+    )
+    slow_notice.daemon = True
+    slow_notice.start()
     try:
         with err.status(f"Compiling with {escape(model)} (local)..."):
             result = compiler.compile(prompt, context, stack_names, prompt_type)
     except PromptPumpError as exc:
+        slow_notice.cancel()
         note(f"[red]error:[/red] {escape(str(exc))}")
         raise typer.Exit(1) from exc
+    finally:
+        slow_notice.cancel()
     elapsed = time.perf_counter() - start
+
+    _warn_if_slow(result, elapsed, client, already_notified=slow_notice_displayed.is_set())
 
     if result.missing_tags:
         note(
@@ -361,6 +440,7 @@ def run(
 def _interactive_menu(ctx: typer.Context) -> None:
     """Show the entry menu and invoke the selected enhancement workflow."""
     selected_model = _choose_model_in_menu()
+    ctx.meta["promptpump_model_selection_checked"] = True
     err.print("[bold cyan]PromptPump[/bold cyan] — choose what kind of prompt to enhance")
     err.print("  [bold]1[/bold]  Code generation")
     err.print("  [bold]2[/bold]  Image generation")
