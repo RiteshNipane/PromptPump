@@ -312,7 +312,7 @@ class PromptCompiler:
 
     def build_messages(
         self, shorthand: str, context: WorkspaceContext, stacks: Sequence[str] = (),
-        mode: PromptMode | str = PromptMode.CODE,
+        mode: PromptMode | str = PromptMode.CODE, *, new_project: bool = False,
     ) -> list[Message]:
         """Assemble the system + user messages (also used by ``--dry-run``)."""
         selected_mode = PromptMode(mode)
@@ -320,18 +320,23 @@ class PromptCompiler:
             raise PromptPumpError("--stack profiles are only available for code prompts.")
         profiles = resolve_stacks(stacks)
         return [
-            {"role": "system", "content": build_system_prompt(profiles, selected_mode)},
+            {
+                "role": "system",
+                "content": build_system_prompt(
+                    profiles, selected_mode, new_project=new_project
+                ),
+            },
             {
                 "role": "user",
                 "content": build_user_message(
-                    shorthand, context.render(), selected_mode
+                    shorthand, context.render(), selected_mode, new_project=new_project
                 ),
             },
         ]
 
     def compile(
         self, shorthand: str, context: WorkspaceContext, stacks: Sequence[str] = (),
-        mode: PromptMode | str = PromptMode.CODE,
+        mode: PromptMode | str = PromptMode.CODE, *, new_project: bool = False,
     ) -> CompileResult:
         """Compile ``shorthand`` into a validated prompt for the selected mode."""
         if not shorthand.strip():
@@ -339,7 +344,9 @@ class PromptCompiler:
 
         selected_mode = PromptMode(mode)
         required_tags = get_required_tags(selected_mode)
-        messages = self.build_messages(shorthand, context, stacks, selected_mode)
+        messages = self.build_messages(
+            shorthand, context, stacks, selected_mode, new_project=new_project
+        )
         metrics: list[InferenceMetrics] = []
 
         def call(msgs: list[Message]) -> str:
@@ -385,6 +392,7 @@ class PromptCompiler:
         grounded = False
         if (
             selected_mode is PromptMode.CODE
+            and not new_project
             and self.ground_context
             and "<codebase_context>" in prompt
         ):
@@ -402,7 +410,7 @@ class PromptCompiler:
             metrics=metrics,
             issues=(
                 check_references(prompt, context, shorthand)
-                if self.verify and selected_mode is PromptMode.CODE
+                if self.verify and selected_mode is PromptMode.CODE and not new_project
                 else []
             ),
         )

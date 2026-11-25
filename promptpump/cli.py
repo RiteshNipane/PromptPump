@@ -5,6 +5,7 @@ import sys
 import threading
 import time
 from dataclasses import asdict
+from enum import Enum
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -45,6 +46,14 @@ from .tokens import TokenCounter, get_counter
 DEFAULT_TELEMETRY_PROMPT = "add input validation and clear error messages to the main entry point"
 SLOW_COMPILE_SECONDS = 120.0
 SLOW_DECODE_TOKENS_PER_SECOND = 5.0
+
+
+class ProjectKind(str, Enum):
+    """Whether code generation targets a greenfield or existing project."""
+
+    NEW = "new"
+    ONGOING = "ongoing"
+
 
 app = typer.Typer(
     name="promptpump",
@@ -274,8 +283,15 @@ def run(
     path: Annotated[
         Path,
         typer.Option("--path", "-p", exists=True, file_okay=False, resolve_path=True,
-                     help="Project directory to scan in code mode."),
+                     help="Existing project directory to scan in code mode."),
     ] = Path("."),
+    project_type: Annotated[
+        ProjectKind,
+        typer.Option(
+            "--project-type",
+            help="Code project state: 'new' skips scanning; 'ongoing' uses workspace context.",
+        ),
+    ] = ProjectKind.ONGOING,
     model: Annotated[
         Optional[str],
         typer.Option(
@@ -350,21 +366,27 @@ def run(
     counter = _counter_or_exit(tokenizer)
 
     if prompt_type is PromptMode.CODE:
-        with err.status("Scanning workspace..."):
-            context = scan_workspace(
-                path, max_tokens=max_context_tokens, counter=counter,
-                query=prompt if rank else None,
+        if project_type is ProjectKind.NEW:
+            context = WorkspaceContext(root=path.resolve())
+            note("[dim]New project selected; workspace scanning is skipped.[/dim]")
+        else:
+            with err.status("Scanning workspace..."):
+                context = scan_workspace(
+                    path, max_tokens=max_context_tokens, counter=counter,
+                    query=prompt if rank else None,
+                )
+            note(
+                f"[dim]Scanned {context.root.name}/: {len(context.tree_lines)} tree entries, "
+                f"{len(context.key_files)} key files, {len(context.outlines)} outlined modules[/dim]"
             )
-        note(
-            f"[dim]Scanned {context.root.name}/: {len(context.tree_lines)} tree entries, "
-            f"{len(context.key_files)} key files, {len(context.outlines)} outlined modules[/dim]"
-        )
     else:
         context = WorkspaceContext(root=path)
         note(f"[dim]Using {prompt_type.value} prompt mode; workspace scanning is not needed.[/dim]")
-    if stats and prompt_type is PromptMode.CODE:
+    if stats and prompt_type is PromptMode.CODE and project_type is ProjectKind.ONGOING:
         with err.status("Measuring whole-repo baseline..."):
             _print_stats(context, counter)
+    elif stats and prompt_type is PromptMode.CODE:
+        note("[dim]Workspace token statistics are unavailable for a new project.[/dim]")
     elif stats:
         note("[dim]Workspace token statistics are available only for code prompts.[/dim]")
 
@@ -379,7 +401,13 @@ def run(
     if dry_run:
         payload = "\n".join(
             f"===== {m['role'].upper()} =====\n{m['content']}\n"
-            for m in compiler.build_messages(prompt, context, stack_names, prompt_type)
+            for m in compiler.build_messages(
+                prompt,
+                context,
+                stack_names,
+                prompt_type,
+                new_project=(prompt_type is PromptMode.CODE and project_type is ProjectKind.NEW),
+            )
         )
         _emit(payload, output)
         raise typer.Exit()
@@ -404,7 +432,13 @@ def run(
     slow_notice.start()
     try:
         with err.status(f"Compiling with {escape(model)} (local)..."):
-            result = compiler.compile(prompt, context, stack_names, prompt_type)
+            result = compiler.compile(
+                prompt,
+                context,
+                stack_names,
+                prompt_type,
+                new_project=(prompt_type is PromptMode.CODE and project_type is ProjectKind.NEW),
+            )
     except PromptPumpError as exc:
         slow_notice.cancel()
         note(f"[red]error:[/red] {escape(str(exc))}")
@@ -451,8 +485,44 @@ def _interactive_menu(ctx: typer.Context) -> None:
         err.print("[red]Choose 1, 2, or 3.[/red]")
         raise typer.Exit(2)
     mode = modes[selected]
+    project_type = ProjectKind.ONGOING
+    project_path = Path.cwd()
+    if mode is PromptMode.CODE:
+        err.print("[bold]Is this a new project or an ongoing project?[/bold]")
+        err.print("  [bold]1[/bold]  New project (skip workspace scan)")
+        err.print("  [bold]2[/bold]  Ongoing project (use existing workspace)")
+        project_choice = typer.prompt("Project type", type=int)
+        if project_choice == 1:
+            project_type = ProjectKind.NEW
+        elif project_choice == 2:
+            project_type = ProjectKind.ONGOING
+            current_path = Path.cwd().resolve()
+            err.print(f"Current workspace: {escape(str(current_path))}")
+            if not typer.confirm("Is this the correct project workspace?", default=True):
+                project_path = _prompt_project_directory()
+        else:
+            err.print("[red]Choose 1 for new or 2 for ongoing.[/red]")
+            raise typer.Exit(2)
     shorthand = typer.prompt("Describe what you want the prompt to produce")
-    ctx.invoke(run, ctx=ctx, prompt=shorthand, prompt_type=mode, model=selected_model)
+    ctx.invoke(
+        run,
+        ctx=ctx,
+        prompt=shorthand,
+        prompt_type=mode,
+        model=selected_model,
+        path=project_path,
+        project_type=project_type,
+    )
+
+
+def _prompt_project_directory() -> Path:
+    """Ask for an existing project directory and validate it before scanning."""
+    while True:
+        entered = typer.prompt("Enter the path to the existing project folder")
+        candidate = Path(entered.strip().strip('"').strip("'")).expanduser()
+        if candidate.is_dir():
+            return candidate.resolve()
+        err.print(f"[red]Folder not found:[/red] {escape(str(candidate))}")
 
 
 @app.command()

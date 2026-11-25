@@ -26,7 +26,7 @@ A great prompt has **structure** (role, objective, constraints, output format) a
 
 PromptPump has three workflows, selected from the startup menu or with `--type`:
 
-1. **Code** scans your project and adds file-aware implementation guidance and optional stack rules.
+1. **Code** lets you choose a new project (no scan) or an ongoing project (confirm or change the workspace, then add file-aware guidance and optional stack rules).
 2. **Image** structures the subject, visual style, composition, lighting, and relevant constraints.
 3. **Content** shapes stories, scripts, articles, and other writing around audience, structure, voice, and boundaries.
 4. **Compiles locally** with Ollama and can copy the enhanced prompt to your clipboard.
@@ -104,7 +104,10 @@ Use `promptpump model` to choose and save the current model, or `promptpump mode
 
 ## Quick start
 
-Open a terminal **in your project folder** (PromptPump scans the current directory) and run:
+In the interactive menu, choose whether code work is a new or ongoing project. For an ongoing
+project, PromptPump confirms the current folder and lets you enter another path if needed. For a
+new project, it skips scanning. Direct `promptpump run` commands default to ongoing; use
+`--path` to choose a workspace or `--project-type new` to skip the scan.
 
 ```bash
 cd my-project
@@ -122,10 +125,9 @@ promptpump run "a tiny astronaut tending a garden on the moon" --type image
 promptpump run "write a 3-scene mystery short film set in a night train" --type content
 ```
 
-Image and content modes do not scan the current folder. Code mode remains the default and
-continues to use workspace context. Use an instruction-following Ollama model suited to
-creative prompting (for example, `--model qwen2.5:7b` if installed); PromptPump enhances
-prompts and does not generate the final image or story itself.
+Image and content modes do not scan the current folder. Code mode remains the default. Use an
+instruction-following Ollama model suited to creative prompting (for example, `--model qwen2.5:7b`
+if installed); PromptPump enhances prompts and does not generate the final image or story itself.
 
 Local models can take a minute or two on CPU. If a run takes over two minutes (or approaches its timeout), PromptPump suggests switching models. After a run, it also suggests a smaller installed model when decode speed is below 5 tokens/s. Use `promptpump model` to select one, or `--timeout 900` for big models on slow machines.
 
@@ -146,6 +148,9 @@ promptpump run "add caching" --dry-run
 
 # Use a different model or a remote Ollama host
 promptpump run "write tests for utils" -m qwen2.5-coder:14b --host http://192.168.1.20:11434
+
+# Start a code prompt for a new project without scanning the current folder
+promptpump run "create a small 2D car game" --project-type new
 ```
 
 #### Interactive image-generation example
@@ -211,6 +216,7 @@ promptpump run "a fox in a snowy forest at dusk" --type image
 | `--stack`, `-s` | none | Inject stack rules; repeatable |
 | `--copy / --no-copy` | copy | Copy the result to the clipboard |
 | `--path`, `-p` | `.` | Project directory to scan |
+| `--project-type` | `ongoing` | For code prompts, use `new` to skip scanning or `ongoing` to include workspace context |
 | `--model`, `-m` | saved model or `qwen2.5-coder:7b` | Per-run Ollama model override; uses `PROMPTPUMP_MODEL` as the initial preference when nothing is saved, then falls back to an installed chat model if unavailable |
 | `--host` | `http://localhost:11434` | Ollama URL (env `PROMPTPUMP_HOST`) |
 | `--max-context-tokens` | `3000` | Budget for the workspace snapshot |
@@ -250,13 +256,13 @@ playwright`.
 ## How it works
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/RiteshNipane/PromptPump/main/docs/how-it-works.png" alt="PromptPump pipeline: shorthand and workspace scan feed a fixed-schema system prompt, a local Ollama model, validation with one repair retry, grounding with real scan facts, then terminal and clipboard output" width="460">
+  <img src="https://raw.githubusercontent.com/RiteshNipane/PromptPump/main/docs/how-it-works.png" alt="PromptPump pipeline: shorthand and an optional workspace scan for ongoing code projects feed a fixed-schema prompt, local Ollama model, validation, then terminal and clipboard output" width="460">
 </p>
 
 **Built to be as deterministic as a local LLM allows**
 
 - All modes use a fixed seed and low temperature; model outputs can still vary between runs.
-- **Code mode** scans the selected workspace, validates its seven-section schema, grounds `<codebase_context>` in scan facts, and warns about unsupported file/function references or unrequested test/evaluation edits.
+- **Code mode** lets you select new-project prompting without a scan or ongoing-project prompting with a selected workspace scan. Ongoing prompts are grounded in scan facts and checked for unsupported file/function references.
 - **Image mode** validates image-specific sections for subject/scene, visual style, composition/lighting, and constraints. It skips workspace scanning, code grounding, and code-reference warnings.
 - **Content mode** validates sections for audience/context, content structure, voice/style, and boundaries. It also skips workspace scanning, code grounding, and code-reference warnings.
 - Filler text, reasoning blocks, and wrapping code fences are stripped in every mode. Missing required sections trigger one repair attempt.
@@ -286,7 +292,7 @@ print(result.is_valid, result.missing_tags)
 
 ## Token budget and input reduction
 
-PromptPump packs your project into a fixed token budget (`--max-context-tokens`, default 3000): a file tree, key files (README, config, entry points), and a symbol outline of your code (Python via `ast`; JS/TS and Go via lightweight regexes). Outlines are packed in **BM25 relevance order** for your prompt, so the budget goes to the files most likely to matter instead of whatever comes first alphabetically.
+For ongoing code projects, PromptPump packs the selected project into a fixed token budget (`--max-context-tokens`, default 3000): a file tree, key files (README, config, entry points), and a symbol outline of your code (Python via `ast`; JS/TS and Go via lightweight regexes). Outlines are packed in **BM25 relevance order** for your prompt, so the budget goes to the files most likely to matter instead of whatever comes first alphabetically. New-project prompts skip this scan.
 
 ```bash
 promptpump run "add retry logic to the ollama client" --stats --dry-run
@@ -387,7 +393,7 @@ Reproduce with `python benchmarks/prompt_quality/run.py --model qwen2.5-coder:7b
 
 ## Tips for best results
 
-- **Run it from your project root** so the scan reflects the real code.
+- **For ongoing code work, select the right project folder** so the scan reflects the real code. The interactive menu confirms or lets you change it.
 - **Be specific in the shorthand.** *"In api/main.py, make query_rag require [Source N] markers and return them in QueryResponse"* gives a much tighter prompt than *"add citations"*.
 - **Pick the model for your hardware.** The 14B model follows instructions better in informal tests but needs a GPU with roughly 12 GB of VRAM to run at a comfortable speed; on a 6 GB laptop GPU the 7B is the practical choice.
 - **Review before you paste.** Check file names, assumptions, and scope. Small local models can still misread intent.

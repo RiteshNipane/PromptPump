@@ -90,9 +90,7 @@ whole output, no closing remarks.
 2. The output MUST contain exactly these seven XML tags, once each, in this order:
 {{TAG_LIST}}
 3. Inside each tag use terse, imperative Markdown (bullets or numbered lists). No filler.
-4. Ground everything in the <workspace> block. Reference only files, modules, and \
-dependencies that appear there. If something is unknown, record it as an explicit \
-assumption inside <constraints_and_guardrails>. Never invent file paths or APIs.
+4. {{WORKSPACE_RULE}}
 5. Do not copy the shorthand verbatim. Expand it into concrete, testable requirements.
 6. REUSE BEFORE CREATE: if the workspace outline already contains a function or class that \
 does part of the job, name it and extend or call it. Never propose a duplicate module or helper.
@@ -105,8 +103,7 @@ see must be listed under "Assumptions (verify before coding)" in <constraints_an
 10. STAY IN SCOPE: add no features, flags, files, or dependencies beyond the request. If the \
 request contains contradictory or ambiguous parts, resolve them explicitly in the assumptions \
 instead of copying the contradiction. Do not invent restrictions the request did not state \
-(such as "only modify directory X"); name the files that should change and the existing \
-files to reuse or read.
+(such as "only modify directory X"); {{FILE_SCOPE_RULE}}
 11. COMPLETE THE DATA FLOW: when the change adds or alters a field, parameter, or output, \
 name every function that must produce or pass it through (for example the route handler that \
 builds the response), not only the model that declares it. If the request says enforce, \
@@ -188,7 +185,10 @@ def render_stack_section(stacks: Sequence[StackProfile]) -> str:
 
 
 def build_system_prompt(
-    stacks: Sequence[StackProfile] = (), mode: PromptMode | str = PromptMode.CODE
+    stacks: Sequence[StackProfile] = (),
+    mode: PromptMode | str = PromptMode.CODE,
+    *,
+    new_project: bool = False,
 ) -> str:
     """Assemble the mode-specific system prompt for the local model."""
     selected = PromptMode(mode)
@@ -196,6 +196,23 @@ def build_system_prompt(
     if selected is PromptMode.CODE:
         template = SYSTEM_PROMPT_TEMPLATE
         template = template.replace("{{STACK_SECTION}}", render_stack_section(stacks))
+        workspace_rule = (
+            "Treat the workspace note as a new-project declaration, not as an existing codebase. "
+            "Do not claim that files, APIs, or dependencies already exist. You may propose the "
+            "smallest set of new paths needed to build the requested project, and label choices "
+            "not specified by the user as assumptions."
+            if new_project
+            else "Ground everything in the <workspace> block. Reference only files, modules, and "
+            "dependencies that appear there. If something is unknown, record it as an explicit "
+            "assumption inside <constraints_and_guardrails>. Never invent file paths or APIs."
+        )
+        template = template.replace("{{WORKSPACE_RULE}}", workspace_rule)
+        file_scope_rule = (
+            "name the minimal files to create and do not imply that they already exist."
+            if new_project
+            else "name the files that should change and the existing files to reuse or read."
+        )
+        template = template.replace("{{FILE_SCOPE_RULE}}", file_scope_rule)
     else:
         template = _CREATIVE_PROMPT_TEMPLATE.replace(
             "{{MODE_RULES}}", _CREATIVE_MODE_RULES[selected]
@@ -204,11 +221,20 @@ def build_system_prompt(
 
 
 def build_user_message(
-    shorthand: str, workspace_text: str = "", mode: PromptMode | str = PromptMode.CODE
+    shorthand: str,
+    workspace_text: str = "",
+    mode: PromptMode | str = PromptMode.CODE,
+    *,
+    new_project: bool = False,
 ) -> str:
     """Wrap the user request and, for code mode, its workspace snapshot."""
     selected = PromptMode(mode)
     if selected is PromptMode.CODE:
+        if new_project:
+            workspace_text = (
+                "NEW PROJECT. No workspace scan was performed. No existing files, modules, APIs, "
+                "or dependencies have been confirmed."
+            )
         return (
             f"<shorthand_request>\n{shorthand.strip()}\n</shorthand_request>\n\n"
             f"<workspace>\n{workspace_text.strip()}\n</workspace>\n\n"
