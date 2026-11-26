@@ -157,6 +157,23 @@ promptpump run "create a small 2D car game" --project-type new
 
 ![PromptPump selecting an installed Ollama model and enhancing an image-generation prompt](docs/images/interactive-image-generation-example.png)
 
+### PromptPump 2.2.0 terminal examples
+
+Image mode expands a short description into a prompt for an image-generation model:
+
+![PromptPump 2.2.0 enhancing an image-generation prompt](docs/images/promptpump-2.2.0-image-generation.png)
+
+For a new code project, choose **Code generation** and then **New project**. These screenshots
+show the generated e-commerce project prompt across two terminal screens:
+
+![PromptPump 2.2.0 generating a new-project code prompt, first screen](docs/images/promptpump-2.2.0-code-new-project-1.png)
+
+![PromptPump 2.2.0 generating a new-project code prompt, second screen](docs/images/promptpump-2.2.0-code-new-project-2.png)
+
+List the built-in stack profiles with `promptpump stacks`:
+
+![PromptPump 2.2.0 stack profile list](docs/images/promptpump-2.2.0-stack-list.png)
+
 ### Example output (abridged)
 
 Input: `promptpump run "add source citations to each RAG answer" --stack fastapi`
